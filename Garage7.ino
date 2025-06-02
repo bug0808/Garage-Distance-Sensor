@@ -20,6 +20,7 @@ V4
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <Adafruit_NeoPixel.h> //LED Ring
 #include <esp32-hal.h> // Required for rebooting the ESP32
 #include <time.h> // Library for time functions
 
@@ -32,8 +33,8 @@ V4
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 // Network credentials
-const char* ssid = "YOUR WIFI";
-const char* password = "YOUR PASSWORD";
+const char* ssid = "Your WIFI";
+const char* password = "WIFI Password";
 
 // Optionally use a fixed IP address
 bool useFixedIP = true;
@@ -51,6 +52,18 @@ String header;
 
 // Assign output variables to GPIO pins
 const int output27 = 27;
+#define DOOR_SENSOR_PIN 26 // Use the GPIO you connected the switch to
+
+// Ultrasonic sensor pins
+#define TRIG_PIN 13
+#define ECHO_PIN 12
+const int stopDistance = 30; //30 cm for testing  //Edit for desired distance of car from wherever the sensor is 
+// NeoPixel LED ring
+#define LED_PIN    17
+#define NUM_LEDS   16
+Adafruit_NeoPixel ring(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
+
+
 
 // Define pulse duration in milliseconds (example: 2000ms = 2s)
 const long pulseDuration = 2000;
@@ -87,6 +100,11 @@ void setup() {
 
   // Initialize the output variables as outputs
   pinMode(output27, OUTPUT);
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+  pinMode(DOOR_SENSOR_PIN, INPUT_PULLUP);
+  ring.begin();
+  ring.show(); // Initialize all pixels to 'off'
   // Set output to HIGH
   digitalWrite(output27, HIGH);
 
@@ -171,9 +189,42 @@ void handleLast10Page(WiFiClient& client) {
   client.println("</body></html>");
 }
 
+// Function to get distance from ultrasonic sensor (in cm)
+long getDistanceCM() {
+  digitalWrite(TRIG_PIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG_PIN, LOW);
+  long duration = pulseIn(ECHO_PIN, HIGH, 30000); // 30ms timeout (~5m)
+  long distance = duration * 0.034 / 2;
+  return distance;
+}
+
+// Function to update LED ring color
+void updateLEDRing(long distance, bool doorOpen) {
+  uint32_t color;
+  if (!doorOpen) {
+    color = ring.Color(0, 0, 0); // Off if door is closed
+  } else if (distance > 0 && distance < stopDistance) {
+    color = ring.Color(255, 0, 0); // Red
+  } else if (distance >= stopDistance && distance < 400) {
+    color = ring.Color(0, 255, 0); // Green
+  } else {
+    color = ring.Color(0, 0, 255); // Off for out-of-range
+  }
+  for (int i = 0; i < NUM_LEDS; i++) {
+    ring.setPixelColor(i, color);
+  }
+  ring.show();
+}
+
 void loop() {
   unsigned long currentTime = millis();
-
+  
+  bool doorOpen = digitalRead(DOOR_SENSOR_PIN) == HIGH; // LOW = switch closed (door closed)
+  long distance = getDistanceCM();
+  updateLEDRing(distance, doorOpen);
   // Check if it's time to check the internet connection
   if (currentTime - lastCheckTime >= checkInterval) {
     lastCheckTime = currentTime;
